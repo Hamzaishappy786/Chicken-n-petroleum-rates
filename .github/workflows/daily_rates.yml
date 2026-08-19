@@ -1,0 +1,29 @@
+name: Daily Rates Bot
+
+on:
+  schedule:
+    # 04:00 UTC = 09:00 AM PKT (UTC+5)
+    - cron: "0 4 * * *"
+  workflow_dispatch:   # lets you trigger manually from GitHub UI
+
+jobs:
+  send-rates:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run scraper
+        env:
+          GMAIL_USER: ${{ secrets.GMAIL_USER }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          RECIPIENT_EMAIL: ${{ secrets.RECIPIENT_EMAIL }}
+        run: python scraper.py
