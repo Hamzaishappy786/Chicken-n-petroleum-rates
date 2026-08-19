@@ -1,8 +1,11 @@
 import os
 import re
 import sys
+import time
 import smtplib
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 from bs4 import BeautifulSoup
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -17,7 +20,14 @@ POULTRY_BASE = "https://lahore.punjab.gov.pk"
 POULTRY_PAGE = f"{POULTRY_BASE}/poultry-rate-list"
 OGRA_PRICES_PAGE = "https://ogra.org.pk/price-publications"
 
-HEADERS = {"User-Agent": "Mozilla/5.0"}
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Accept-Encoding": "gzip, deflate, br",
+    "Connection": "keep-alive",
+    "Upgrade-Insecure-Requests": "1",
+}
 
 FUEL_LABELS = {
     "motor spirit": "Petrol (MS)",
@@ -28,6 +38,16 @@ FUEL_LABELS = {
     "ldo": "Light Diesel Oil (LDO)",
     "kerosene": "Kerosene Oil",
 }
+
+
+def make_session() -> requests.Session:
+    session = requests.Session()
+    session.headers.update(HEADERS)
+    retry = Retry(total=4, backoff_factor=2, status_forcelist=[429, 500, 502, 503, 504])
+    adapter = HTTPAdapter(max_retries=retry)
+    session.mount("https://", adapter)
+    session.mount("http://", adapter)
+    return session
 
 
 def send_email(subject: str, html_body: str) -> None:
@@ -43,7 +63,7 @@ def send_email(subject: str, html_body: str) -> None:
 
 def get_latest_poultry(session: requests.Session) -> tuple[str, str, str]:
     """Returns (image_url, date_str, slip_page_url)."""
-    resp = session.get(POULTRY_PAGE, timeout=15)
+    resp = session.get(POULTRY_PAGE, timeout=20)
     resp.raise_for_status()
     soup = BeautifulSoup(resp.text, "html.parser")
     link = soup.select_one("table a")
@@ -58,7 +78,10 @@ def get_latest_poultry(session: requests.Session) -> tuple[str, str, str]:
 
 def get_latest_fuel_pdf_url(session: requests.Session) -> str:
     """Scrapes ogra.org.pk/price-publications and returns the first EN PDF link."""
-    resp = session.get(OGRA_PRICES_PAGE, timeout=15, headers=HEADERS)
+    session.get("https://ogra.org.pk/", timeout=15)  # warm up cookies
+    time.sleep(1)
+    resp = session.get(OGRA_PRICES_PAGE, timeout=20,
+                       headers={**HEADERS, "Referer": "https://ogra.org.pk/"})
     resp.raise_for_status()
     soup = BeautifulSoup(resp.text, "html.parser")
     link = soup.select_one("a.download-pdf[href]")
@@ -136,7 +159,7 @@ def build_email_html(image_url: str, date_str: str, poultry_page: str,
 
 
 def main():
-    session = requests.Session()
+    session = make_session()
     errors = []
 
     image_url = date_str = poultry_page = ""
